@@ -11,15 +11,28 @@
         }
     }
 
-    button {
+    button, input {
         font-size: 1.5em;
         padding: 1em;
     }
+    textarea {
+        width: 100%;
+        margin: .5em 0;
+    }
 </style>
-<button id="connect" onclick="connect()">Connect</button>
-<button id="toggleLock" onclick="sendOtp()" style="display: none">Toggle</button>
+<fieldset>
+    <button id="connectButton" onclick="connect()">Connect</button>
+    <button id="lockButton" onclick="lock()" style="display: none">Toggle</button>
+</fieldset>
+
+<fieldset>
+    <input id="topic" value="rolla/pulse" placeholder="Topic" />
+    <button id="listenButton" onclick="listen()">Listen</button>
+    <code id="messages">Messages</code>
+</fieldset>
 
 <script src="https://cdn.jsdelivr.net/npm/otpauth/dist/otpauth.umd.min.js"></script>
+<script src="https://unpkg.com/mqtt@4.0.1/dist/mqtt.min.js"></script>
 
 <script>
 
@@ -28,8 +41,8 @@
     const otpCounterUuid = '19b10011-e8f2-537e-4f6c-d104768a1214';
     const otpUuid = '19b10012-e8f2-537e-4f6c-d104768a1214';
 
-    const connectButton = document.getElementById('connect');
-    const toggleLockButton = document.getElementById('toggleLock');
+    const connectButton = document.getElementById('connectButton');
+    const lockButton = document.getElementById('lockButton');
 
     const secret = OTPAuth.Secret.fromUTF8('4x2%#$2_*f+4mi6t(&p*vl1u^3hkd79@+$-7(snt*^b13!*++');
     const hotp = new OTPAuth.HOTP({ secret });
@@ -39,6 +52,8 @@
 
     let isLockOpen;
 
+    let device;
+
     function setOtpCounter(dataView) {
         if (!dataView) return;
         counter = dataView.getUint32(0, true);
@@ -46,21 +61,31 @@
     }
 
     function setLock(value) {
-        if (isLockOpen === undefined) toggleLockButton.removeAttribute('style');
         isUnlocked = Boolean(value.getUint8());
-        toggleLockButton.innerText = isUnlocked ? 'Lock' : 'Unlock';
+        lockButton.innerText = isUnlocked ? 'Lock' : 'Unlock';
+        if (isLockOpen === undefined) lockButton.removeAttribute('style');
     }
 
     async function connect() {
 
-        const device = await navigator.bluetooth.requestDevice({
+        if (device) {
+            if (device.gatt.connected) {
+                device.gatt.disconnect();
+                connectButton.innerText = "Connect";
+                lockButton.style.display = "none";
+                device = null;
+            }
+            return;
+        }
+
+        device = await navigator.bluetooth.requestDevice({
             filters: [{
                 services: [serviceUuid]
             }],
         });
         const server = await device.gatt.connect();
 
-        connectButton.setAttribute('disabled', true);
+        connectButton.innerText = "Disconnect";
 
         const relayService = await server.getPrimaryService(serviceUuid);
         const relayCharacteristic = await relayService.getCharacteristic(relayUuid)
@@ -92,10 +117,15 @@
                 ));
     }
 
-    async function sendOtp() {
-        toggleLockButton.setAttribute('disabled', true);
+    async function lock() {
+        lockButton.setAttribute('disabled', true);
         await  otpCharacteristic.writeValueWithResponse(Uint32Array.of(hotp.generate({ counter })))
-        toggleLockButton.removeAttribute('disabled');
+        lockButton.removeAttribute('disabled');
+    }
+
+    function listen() {
+        mqtt.connect('mqtt://test.mosquitto.org');
     }
 </script>
+
 </html>
