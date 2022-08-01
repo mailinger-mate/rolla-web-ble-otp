@@ -25,21 +25,21 @@
     <button id="lockButton" onclick="lock()" style="display: none">Toggle</button>
 </fieldset>
 
-<fieldset>
+<!-- <fieldset>
     <input id="topic" value="rolla/pulse" placeholder="Topic" />
     <button id="listenButton" onclick="listen()">Listen</button>
     <code id="messages">Messages</code>
-</fieldset>
+</fieldset> -->
 
 <script src="https://cdn.jsdelivr.net/npm/otpauth/dist/otpauth.umd.min.js"></script>
-<script src="https://unpkg.com/mqtt@4.0.1/dist/mqtt.min.js"></script>
+<!-- <script src="https://unpkg.com/mqtt@4.0.1/dist/mqtt.min.js"></script> -->
 
 <script>
 
-    const serviceUuid = '19b10010-e8f2-537e-4f6c-d104768a1214';
-    const relayUuid = '19b10013-e8f2-537e-4f6c-d104768a1214';
-    const otpCounterUuid = '19b10011-e8f2-537e-4f6c-d104768a1214';
-    const otpUuid = '19b10012-e8f2-537e-4f6c-d104768a1214';
+    const serviceUuid = '5afe1eaf-f000-4ecb-ab75-f9ec2e1f1f10';
+    const lockUuid = '0be70cad-92aa-48c3-b26a-330e339aa163';
+    const otpUuid = 'e313b008-9fb4-4f5e-95a7-3dc5ee030543';
+    const nonceUuid = 'b0446719-6abf-4eac-8f15-9f94062b0763';
 
     const connectButton = document.getElementById('connectButton');
     const lockButton = document.getElementById('lockButton');
@@ -47,17 +47,17 @@
     const secret = OTPAuth.Secret.fromUTF8('4x2%#$2_*f+4mi6t(&p*vl1u^3hkd79@+$-7(snt*^b13!*++');
     const hotp = new OTPAuth.HOTP({ secret });
 
+    const textEncoder = new TextEncoder();
+
     let otpCharacteristic;
-    let counter;
-
+    let otpNonce;
     let isLockOpen;
-
     let device;
 
-    function setOtpCounter(dataView) {
+    function setOtpNonce(dataView) {
         if (!dataView) return;
-        counter = dataView.getUint32(0, true);
-        console.log('OTP Counter', counter);
+        otpNonce = dataView.getUint32(0, true);
+        console.log('OTP Nonce', otpNonce);
     }
 
     function setLock(value) {
@@ -71,9 +71,7 @@
         if (device) {
             if (device.gatt.connected) {
                 device.gatt.disconnect();
-                connectButton.innerText = "Connect";
-                lockButton.style.display = "none";
-                device = null;
+                onDisconnect();
             }
             return;
         }
@@ -83,35 +81,38 @@
                 services: [serviceUuid]
             }],
         });
+
+        device.addEventListener('gattserverdisconnected', onDisconnect);
+
         const server = await device.gatt.connect();
 
         connectButton.innerText = "Disconnect";
 
-        const relayService = await server.getPrimaryService(serviceUuid);
-        const relayCharacteristic = await relayService.getCharacteristic(relayUuid)
-        const otpCounterCharacteristic = await relayService.getCharacteristic(otpCounterUuid);
-        otpCharacteristic = await relayService.getCharacteristic(otpUuid);
+        const lockService = await server.getPrimaryService(serviceUuid);
+        const lockCharacteristic = await lockService.getCharacteristic(lockUuid)
+        const otpNonceCharacteristic = await lockService.getCharacteristic(nonceUuid);
+        otpCharacteristic = await lockService.getCharacteristic(otpUuid);
 
-        otpCounterCharacteristic
+        otpNonceCharacteristic
             .readValue()
             .then(value =>
-                !counter && setOtpCounter(value));
-        otpCounterCharacteristic
+                !otpNonce && setOtpNonce(value));
+        otpNonceCharacteristic
             .startNotifications()
             .then(() =>
-                otpCounterCharacteristic.addEventListener(
+                otpNonceCharacteristic.addEventListener(
                     'characteristicvaluechanged',
-                    event => setOtpCounter(event.target.value)
+                    event => setOtpNonce(event.target.value)
                 ));
 
-        relayCharacteristic
+        lockCharacteristic
             .readValue()
             .then(value =>
-                isUnlocked === undefined && setLock(value));
-        relayCharacteristic
+                isLockOpen === undefined && setLock(value));
+        lockCharacteristic
             .startNotifications()
             .then(value =>
-                relayCharacteristic.addEventListener(
+                lockCharacteristic.addEventListener(
                     'characteristicvaluechanged',
                     event => setLock(event.target.value)
                 ));
@@ -119,12 +120,20 @@
 
     async function lock() {
         lockButton.setAttribute('disabled', true);
-        await  otpCharacteristic.writeValueWithResponse(Uint32Array.of(hotp.generate({ counter })))
+        const otp = hotp.generate({ counter: otpNonce });
+        await  otpCharacteristic.writeValueWithResponse(textEncoder.encode(otp))
         lockButton.removeAttribute('disabled');
     }
 
-    function listen() {
-        mqtt.connect('mqtts://test.mosquitto.org');
+    // function listen() {
+    //     mqtt.connect('mqtt://test.mosquitto.org');
+    // }
+
+    function onDisconnect() {
+        connectButton.innerText = "Connect";
+        lockButton.style.display = "none";
+        lockButton.removeAttribute('disabled');
+        device = null;
     }
 </script>
 
